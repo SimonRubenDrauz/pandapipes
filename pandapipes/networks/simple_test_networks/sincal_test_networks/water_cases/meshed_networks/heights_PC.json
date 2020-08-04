@@ -1694,7 +1694,7 @@
     "water_tower": {
       "_module": "pandas.core.frame",
       "_class": "DataFrame",
-      "_object": "{\"columns\":[\"name\",\"junction\",\"height_m\",\"t_k\",\"in_service\",\"type\"],\"index\":[5],\"data\":[[\"G5\",1,411.292926599999987,283.149999999999977,true,\"water_tower\"]]}",
+      "_object": "{\"columns\":[\"name\",\"junction\",\"height_m\",\"t_k\",\"in_service\",\"type\"],\"index\":[5],\"data\":[[\"G5\",1,61.292926599999987,283.149999999999977,true,\"water_tower\"]]}",
       "orient": "split",
       "dtype": {
         "name": "object",
