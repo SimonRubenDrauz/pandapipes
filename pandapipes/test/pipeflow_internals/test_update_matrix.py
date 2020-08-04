@@ -6,7 +6,7 @@ import numpy as np
 import pandapipes.networks.simple_gas_networks as nw
 import pytest
 from pandapipes.pipeflow import logger as pf_logger
-from pandapipes.test.stanet_comparison.pipeflow_stanet_comparison import pipeflow_stanet_comparison
+from pandapipes.test.comparison.pipeflow_comparison import pipeflow_comparison
 
 try:
     import pplog as logging
@@ -27,7 +27,7 @@ def test_update(log_results=False):
     """
     # before: gas_case3.json
     net = nw.gas_one_pipe1()
-    p_diff, v_diff_abs = pipeflow_stanet_comparison(net, log_results,
+    p_diff, v_diff_abs = pipeflow_comparison(net, log_results,
                                                     only_update_hydraulic_matrix=True)
     assert np.all(p_diff < 0.01)
     assert np.all(v_diff_abs < 0.05)
