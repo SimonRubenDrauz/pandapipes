@@ -75,7 +75,7 @@ def pipeflow_comparison(net, converter_name='stanet', log_results=True, friction
             {"diff_v_from_pipe": v_diff_from_pipe, "diff_v_to_pipe": v_diff_to_pipe,
              "diff_v_mean_pipe": v_diff_mean_pipe, "diff_v_abs_pipe": v_diff_abs_pipe})
 
-        if ('valve' in net) & (('v_' + converter_name) in net['valve']):
+        if ('valve' in net) and (('v_' + converter_name) in net['valve']):
             v_diff_from_valve, v_diff_to_valve, v_diff_mean_valve, v_diff_abs_valve, \
             v_mean_pandapipes_valve, v_conv_valve = retrieve_velocity(net, converter_name, 'valve',
                                                                       consider_only_abs_values)

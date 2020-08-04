@@ -29,7 +29,7 @@ def test_case_delta(log_results=False):
 
 def test_case_delta_2sinks(log_results=False):
     net = nw.heat_transfer_delta_2sinks()
-    p_diff, v_diff_abs, T_diff_mean = pipeflow_openmodelica_comparison(net, log_results, friction_model='colebrook',
+    p_diff, v_diff_abs, T_diff_mean = pipeflow_comparison(net, 'om', log_results, friction_model='colebrook',
                                                           mode="all")
     assert np.all(T_diff_mean < 0.007)
     assert np.all(p_diff < 0.02)
