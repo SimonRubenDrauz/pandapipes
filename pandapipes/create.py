@@ -15,7 +15,7 @@ from pandapipes.std_types.std_type import PumpStdType, add_basic_std_types, add_
     load_std_type
 from pandapipes.std_types.std_type_toolbox import regression_function
 from pandapipes.component_models import Junction, Sink, Source, Pump, Pipe, ExtGrid, \
-    HeatExchanger, Valve, CirculationPumpPressure, CirculationPumpMass
+    HeatExchanger, Valve, CirculationPumpPressure, CirculationPumpMass, PressureControlComponent
 
 try:
     import pplog as logging
