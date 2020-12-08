@@ -3,9 +3,8 @@
 # Use of this source code is governed by a BSD-style license that can be found in the LICENSE file.
 
 import os
-
-from pandapipes import pp_dir
 from pandapipes.io.file_io import from_json
+from pandapipes import pp_dir
 from pandapipes.networks.nw_aux import log_result_upon_loading
 
 try:
@@ -14,15 +13,15 @@ except ImportError:
     import logging
 
 logger = logging.getLogger(__name__)
-water_stanet_path = os.path.join(pp_dir, "networks", "simple_test_networks", "stanet_test_networks",
+water_stanet_path = os.path.join(pp_dir, "networks", "network_files", "stanet_test_networks",
                                  "water_cases")
 water_sincal_path = os.path.join(pp_dir, "networks", "simple_test_networks", "sincal_test_networks",
                                  "water_cases")
-water_modelica_colebrook_path = os.path.join(pp_dir, "networks", "simple_test_networks",
-                                             "openmodelica_test_networks", "water_cases_colebrook")
+water_modelica_colebrook_path = os.path.join(pp_dir, "networks", "network_files",
+                                   "openmodelica_test_networks", "water_cases_colebrook")
 
-water_modelica_swamee_path = os.path.join(pp_dir, "networks", "simple_test_networks",
-                                          "openmodelica_test_networks", "water_cases_swamee-jain")
+water_modelica_swamee_path = os.path.join(pp_dir, "networks", "network_files",
+                                   "openmodelica_test_networks", "water_cases_swamee-jain")
 
 
 # -------------- combined networks --------------
