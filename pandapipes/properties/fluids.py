@@ -11,10 +11,14 @@ from scipy.interpolate import interp1d
 
 try:
     import pplog as logging
+
+    logger = logging.getLogger(__name__, level='CRITICAL')
 except ImportError:
     import logging
 
-logger = logging.getLogger(__name__, level='CRITICAL')
+    logger = logging.getLogger(__name__)
+
+
 
 
 class Fluid(JSONSerializableClass):
