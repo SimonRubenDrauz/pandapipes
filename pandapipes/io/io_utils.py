@@ -109,11 +109,3 @@ def json_net(obj):
     net_dict = {k: item for k, item in obj.items() if not k.startswith("_")}
     d = with_signature(obj, net_dict)
     return d
-
-
-if __name__ == '__main__':
-    ntw = create_fluid_network()
-    import pandapipes as pp
-
-    pp.to_json(ntw, 'test.json')
-    ntw = pp.from_json('test.json')
