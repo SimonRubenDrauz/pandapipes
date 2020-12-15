@@ -15,7 +15,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 water_stanet_path = os.path.join(pp_dir, "networks", "network_files", "stanet_test_networks",
                                  "water_cases")
-water_sincal_path = os.path.join(pp_dir, "networks", "simple_test_networks", "sincal_test_networks",
+water_sincal_path = os.path.join(pp_dir, "networks", "network_files", "sincal_test_networks",
                                  "water_cases")
 water_modelica_colebrook_path = os.path.join(pp_dir, "networks", "network_files",
                                    "openmodelica_test_networks", "water_cases_colebrook")
