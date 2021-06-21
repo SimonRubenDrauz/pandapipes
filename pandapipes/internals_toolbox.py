@@ -4,7 +4,6 @@
 
 import numpy as np
 
-
 def _sum_by_group_sorted(indices, *values):
     """Auxiliary function to sum up values by some given indices (both as numpy arrays). Expects the
     indices and values to already be sorted.
