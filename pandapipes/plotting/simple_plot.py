@@ -239,17 +239,20 @@ def create_simple_collections(net, respect_valves=False, respect_in_service=True
         if respect_in_service:
             sink_colls = create_sink_collection(
                 net, sinks=net.sink[net.sink.in_service].index, size=sink_size,
-                patch_edgecolor='silver', line_color='silver', linewidths=pipe_width)
+                patch_edgecolor='dimgrey', line_color='dimgrey', linewidths=pipe_width)
         else:
             sink_colls = create_sink_collection(
-                net, size=sink_size, patch_edgecolor='silver', line_color='silver',
+                net, size=sink_size, patch_edgecolor='dimgrey', line_color='dimgrey',
                 linewidths=pipe_width)
         collections["sink"] = sink_colls
 
     if 'valve' in net:
-        valve_colls = create_valve_collection(net, size=valve_size, linewidths=pipe_width,
+        valve_colls = create_valve_collection(net, valves=net.valve.loc[net.valve.opened].index, size=valve_size, linewidths=pipe_width,
                                               color=valve_color, respect_valves=respect_valves)
-        collections["valve"] = valve_colls
+        collections["open_valve"] = valve_colls
+        valve_colls = create_valve_collection(net, valves=net.valve.loc[net.valve.opened==False].index, size=valve_size, linewidths=pipe_width,
+                                              color=valve_color, respect_valves=respect_valves)
+        collections["closed_valve"] = valve_colls
 
     if 'pump' in net:
         if respect_in_service:
