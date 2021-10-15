@@ -65,6 +65,11 @@ class MultiNet(ADict):
             else:
                 r += "\n   - %s (%s nets)" % (cat, len(self['nets'][cat]))
 
+        if 'prosumer' in self:
+            r = "This multi net includes following prosumer:"
+            for cat in self.prosumer:
+                r += "\n   - %s (%s pandaprosumer)" % (cat, 1)
+
         par = []
         for tb in list(self.keys()):
             if isinstance(self[tb], pd.DataFrame) and len(self[tb]) > 0:
