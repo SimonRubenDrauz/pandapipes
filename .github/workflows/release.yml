@@ -48,7 +48,7 @@ jobs:
         run: |
           python3 setup.py sdist --formats=zip
           twine check dist/* --strict 
-          python3 -m twine upload dist/*
+          #python3 -m twine upload dist/*
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.TESTPYPI }}
@@ -60,7 +60,7 @@ jobs:
         run: |
           python3 setup.py sdist --formats=zip
           twine check dist/* --strict 
-          python3 -m twine upload dist/*
+          #python3 -m twine upload dist/*
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI }}
@@ -80,7 +80,7 @@ jobs:
         python-version: ['3.7', '3.8', '3.9', '3.10']
         os:  [ ubuntu-latest, windows-latest ]
     steps:
-      - uses: actions/checkout@v2
+      #- uses: actions/checkout@v2
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v2
         with:
