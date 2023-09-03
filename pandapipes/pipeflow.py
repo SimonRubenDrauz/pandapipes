@@ -4,19 +4,19 @@
 
 import numpy as np
 from numpy import linalg
-from pandapower.auxiliary import ppException
 from scipy.sparse.linalg import spsolve
 
 from pandapipes.idx_branch import ACTIVE as ACTIVE_BR, FROM_NODE, TO_NODE, FROM_NODE_T, \
-    TO_NODE_T, VINIT, T_OUT, VINIT_T
+    TO_NODE_T, VINIT, TINIT_OUT, VINIT_T
 from pandapipes.idx_node import PINIT, TINIT, ACTIVE as ACTIVE_ND
 from pandapipes.pf.build_system_matrix import build_system_matrix
-from pandapipes.pf.derivative_calculation import calculate_derivatives_hydraulic
+from pandapipes.pf.derivative_calculation import calculate_derivatives_hydraulic, calculate_derivatives_thermal
 from pandapipes.pf.pipeflow_setup import get_net_option, get_net_options, set_net_option, \
     init_options, create_internal_results, write_internal_results, get_lookup, create_lookups, \
     initialize_pit, check_connectivity, reduce_pit, \
     set_user_pf_options, init_all_result_tables
 from pandapipes.pf.result_extraction import extract_all_results, extract_results_active_pit
+from pandapower.auxiliary import ppException
 
 try:
     import pandaplan.core.pplog as logging
@@ -68,6 +68,7 @@ def pipeflow(net, sol_vec=None, **kwargs):
     # init result tables
     net["converged"] = False
     init_all_result_tables(net)
+    create_internal_results(net)
 
     create_lookups(net)
     node_pit, branch_pit = initialize_pit(net)
@@ -77,7 +78,8 @@ def pipeflow(net, sol_vec=None, **kwargs):
         return
     calculation_mode = get_net_option(net, "mode")
     calculate_hydraulics = calculation_mode in ["hydraulics", "all"]
-    calculate_heat = calculation_mode in ["heat", "all"]
+    calculate_heat = calculation_mode in ["heat", "all", "bidirectional"]
+    calculate_bidrect = calculation_mode == "bidirectional"
 
     if get_net_option(net, "check_connectivity"):
         nodes_connected, branches_connected = check_connectivity(
@@ -95,116 +97,102 @@ def pipeflow(net, sol_vec=None, **kwargs):
         net["_active_pit"]["node"][:, PINIT] = sol_vec[:len(node_pit)]
         net["_active_pit"]["branch"][:, VINIT] = sol_vec[len(node_pit):]
 
-    if calculate_hydraulics:
-        converged, _ = hydraulics(net)
-        if not converged:
-            raise PipeflowNotConverged("The hydraulic calculation did not converge to a solution.")
-
-    if calculate_heat:
-        converged, _ = heat_transfer(net)
-        if not converged:
-            raise PipeflowNotConverged("The heat transfer calculation did not converge to a "
-                                       "solution.")
-    elif not calculate_hydraulics:
+    if not (calculate_hydraulics | calculate_heat | calculate_bidrect):
         raise UserWarning("No proper calculation mode chosen.")
+    elif calculate_bidrect:
+        pass
+    else:
+        if calculate_hydraulics:
+            converged, _ = hydraulics(net)
+            if not converged:
+                raise PipeflowNotConverged("The hydraulic calculation did not converge to a solution.")
+        if calculate_heat:
+            converged, _ = heat_transfer(net)
+            if not converged:
+                raise PipeflowNotConverged("The heat transfer calculation did not converge to a "
+                                           "solution.")
 
     extract_results_active_pit(net, node_pit, branch_pit, nodes_connected, branches_connected)
     extract_all_results(net, nodes_connected, branches_connected)
 
 
-def hydraulics(net):
+def bidirectional(net):
     max_iter, nonlinear_method, tol_p, tol_v, tol_res = get_net_options(
         net, "iter", "nonlinear_method", "tol_p", "tol_v", "tol_res")
 
-    # Start of nonlinear loop
-    # ---------------------------------------------------------------------------------------------
     niter = 0
     create_internal_results(net)
     if not get_net_option(net, "reuse_internal_data") or "_internal_data" not in net:
         net["_internal_data"] = dict()
 
-    # This branch is used to stop the solver after a specified error tolerance is reached
-    error_v, error_p, residual_norm = [], [], None
+    if net.fluid.is_gas:
+        logger.info("Caution! Temperature calculation does currently not affect hydraulic "
+                    "properties!")
 
+    error_v, error_p, error_t, error_t_out, residual_norm = [], [], [], [], None
+
+
+def newton_raphson(net, funct, solver, *vars):
+    tol_names = np.char.add('tol_', vars)
+    options = get_net_options(net, "iter", "nonlinear_method", "tol_res", *tol_names)
+    max_iter, nonlinear_method, tol_res = next(options), next(options), next(options)
+    tols = [next(options) for _ in tol_names]
+    niter = 0
+    # This branch is used to stop the solver after a specified error tolerance is reached
+    errors = dict.fromkeys(vars, [])
+    residual_norm = None
+    converged = False
+    set_net_option(net, "converged", converged)
     # This loop is left as soon as the solver converged
     while not get_net_option(net, "converged") and niter <= max_iter:
         logger.debug("niter %d" % niter)
-
         # solve_hydraulics is where the calculation takes place
-        v_init, p_init, v_init_old, p_init_old, epsilon = solve_hydraulics(net)
+        results = np.array(funct(net))
+        logger.debug("residual: %s" % results[-1].round(4))
+        residual_norm = linalg.norm(results[-1] / len(results[-1]))
 
-        # Error estimation & convergence plot
-        dv_init = np.abs(v_init - v_init_old)
-        dp_init = np.abs(p_init - p_init_old)
-
-        residual_norm = linalg.norm(epsilon) / len(epsilon)
-        error_v.append(linalg.norm(dv_init) / len(dv_init) if len(dv_init) else 0)
-        error_p.append(linalg.norm(dp_init / len(dp_init)))
-
-        finalize_iteration(net, niter, error_p, error_v, residual_norm, nonlinear_method, tol_p,
-                           tol_v, tol_res, p_init_old, v_init_old)
+        vals_new = results[np.arange(len(vars))]
+        vals_old = results[np.arange(len(vars), len(vars) * 2)]
+        for var, val_new, val_old in zip(vars, vals_new, vals_old):
+            dval = np.abs(val_new - val_old)
+            errors[var].append(linalg.norm(dval) / len(dval) if len(dval) else 0)
+        converged = finalize_iteration(net, niter, residual_norm, nonlinear_method,
+                                       errors=errors, tols=tols,  tol_res=tol_res,
+                                       vals_old=vals_old, vars=vars)
         niter += 1
-    write_internal_results(net, iterations=niter, error_p=error_p[niter - 1],
-                           error_v=error_v[niter - 1], residual_norm=residual_norm)
-
-    converged = get_net_option(net, "converged")
     net['converged'] = converged
-    if converged:
+    write_internal_results(net, **errors)
+    log_final_results(net, net['converged'], niter, residual_norm, tol_names, solver)
+    return niter, residual_norm
+
+
+def hydraulics(net):
+    # Start of nonlinear loop
+    # ---------------------------------------------------------------------------------------------
+    if not get_net_option(net, "reuse_internal_data") or "_internal_data" not in net:
+        net["_internal_data"] = dict()
+    niter, residual_norm = newton_raphson(net, solve_hydraulics, 'hydraulics', 'v', 'p')
+    write_internal_results(net, iterations=niter, residual_norm=residual_norm)
+    if net['converged']:
         set_user_pf_options(net, hyd_flag=True)
 
-    log_final_results(net, converged, niter, residual_norm)
     if not get_net_option(net, "reuse_internal_data"):
         net.pop("_internal_data", None)
 
-    return converged, niter
+    return net['converged'], niter
 
 
 def heat_transfer(net):
-    max_iter, nonlinear_method, tol_t, tol_res = get_net_options(
-        net, "iter", "nonlinear_method", "tol_T", "tol_res")
-
     # Start of nonlinear loop
     # ---------------------------------------------------------------------------------------------
 
     if net.fluid.is_gas:
         logger.info("Caution! Temperature calculation does currently not affect hydraulic "
                     "properties!")
+    niter, residual_norm = newton_raphson(net, solve_temperature, 'heat', 'Tin', 'Tout')
+    write_internal_results(net, iterations_T=niter, residual_norm_T=residual_norm)
 
-    error_t, error_t_out, residual_norm = [], [], None
-
-    set_net_option(net, "converged", False)
-    niter = 0
-
-    # This loop is left as soon as the solver converged
-    while not get_net_option(net, "converged") and niter <= max_iter:
-        logger.debug("niter %d" % niter)
-
-        # solve_hydraulics is where the calculation takes place
-        t_out, t_out_old, t_init, t_init_old, epsilon = solve_temperature(net)
-
-        # Error estimation & convergence plot
-        delta_t_init = np.abs(t_init - t_init_old)
-        delta_t_out = np.abs(t_out - t_out_old)
-
-        residual_norm = (linalg.norm(epsilon) / (len(epsilon)))
-        error_t.append(linalg.norm(delta_t_init) / (len(delta_t_init)))
-        error_t_out.append(linalg.norm(delta_t_out) / (len(delta_t_out)))
-
-        finalize_iteration(net, niter, error_t, error_t_out, residual_norm, nonlinear_method, tol_t,
-                           tol_t, tol_res, t_init_old, t_out_old, hyraulic_mode=True)
-        logger.debug("F: %s" % epsilon.round(4))
-        logger.debug("T_init_: %s" % t_init.round(4))
-        logger.debug("T_out_: %s" % t_out.round(4))
-        niter += 1
-
-    write_internal_results(net, iterations_T=niter, error_T=error_t[niter - 1],
-                           residual_norm_T=residual_norm)
-
-    converged = get_net_option(net, "converged")
-    net['converged'] = converged
-    log_final_results(net, converged, niter, residual_norm, hyraulic_mode=False)
-
-    return converged, niter
+    return net['converged'], niter
 
 
 def solve_hydraulics(net):
@@ -271,20 +259,25 @@ def solve_temperature(net):
     branch_pit[mask, TO_NODE_T] = branch_pit[mask, FROM_NODE]
 
     for comp in net['component_list']:
-        comp.calculate_derivatives_thermal(net, branch_pit, node_pit, branch_lookups, options)
+        comp.adaption_before_derivatives_thermal(
+            net, branch_pit, node_pit, branch_lookups, options)
+    calculate_derivatives_thermal(net, branch_pit, node_pit, options)
+    for comp in net['component_list']:
+        comp.adaption_after_derivatives_thermal(
+            net, branch_pit, node_pit, branch_lookups, options)
     jacobian, epsilon = build_system_matrix(net, branch_pit, node_pit, True)
 
     t_init_old = node_pit[:, TINIT].copy()
-    t_out_old = branch_pit[:, T_OUT].copy()
+    t_out_old = branch_pit[:, TINIT_OUT].copy()
 
     x = spsolve(jacobian, epsilon)
     node_pit[:, TINIT] += x[:len(node_pit)] * options["alpha"]
-    branch_pit[:, T_OUT] += x[len(node_pit):]
+    branch_pit[:, TINIT_OUT] += x[len(node_pit):]
 
-    return branch_pit[:, T_OUT], t_out_old, node_pit[:, TINIT], t_init_old, epsilon
+    return branch_pit[:, TINIT_OUT], t_out_old, node_pit[:, TINIT], t_init_old, epsilon
 
 
-def set_damping_factor(net, niter, error):
+def set_damping_factor(net, niter, errors):
     """
     Set the value of the damping factor (factor for the newton step width) from current results.
 
@@ -298,59 +291,41 @@ def set_damping_factor(net, niter, error):
     EXAMPLE:
         set_damping_factor(net, niter, [error_p, error_v])
     """
-    error_x0 = error[0]
-    error_x1 = error[1]
-
-    error_x0_increased = error_x0[niter] > error_x0[niter - 1]
-    error_x1_increased = error_x1[niter] > error_x1[niter - 1]
+    error_increased = []
+    for error in errors:
+        error_increased.append(error[niter] > error[niter - 1])
     current_alpha = get_net_option(net, "alpha")
-
-    if error_x0_increased and error_x1_increased:
+    if np.all(error_increased):
         set_net_option(net, "alpha", current_alpha / 10 if current_alpha >= 0.1 else current_alpha)
     else:
         set_net_option(net, "alpha", current_alpha * 10 if current_alpha <= 0.1 else 1.0)
+    return error_increased
 
-    return error_x0_increased, error_x1_increased
 
-
-def finalize_iteration(net, niter, error_1, error_2, residual_norm, nonlinear_method, tol_1, tol_2,
-                       tol_res, vals_1_old, vals_2_old, hyraulic_mode=True):
-    col1, col2 = (PINIT, VINIT) if hyraulic_mode else (TINIT, T_OUT)
-
+def finalize_iteration(net, niter, residual_norm, nonlinear_method,
+                       errors, tols, tol_res, vals_old, vars):
+    converged = False
     # Control of damping factor
     if nonlinear_method == "automatic":
-        error_x0_increased, error_x1_increased = set_damping_factor(net, niter,
-                                                                    [error_1, error_2])
-        if error_x0_increased:
-            net["_active_pit"]["node"][:, col1] = vals_1_old
-        if error_x1_increased:
-            net["_active_pit"]["branch"][:, col2] = vals_2_old
+        errors_increased = set_damping_factor(net, niter, errors)
+        logger.debug("alpha: %s" % get_net_option(net, "alpha"))
+        for error_increased, var, val in zip(errors_increased, vars, vals_old):
+            if error_increased: net["_active_pit"]["node"][:, var + 'INIT'] = val
+        if get_net_option(net, "alpha") != 1:
+            set_net_option(net, "converged", False)
+            return converged
     elif nonlinear_method != "constant":
         logger.warning("No proper nonlinear method chosen. Using constant settings.")
-
-    # Setting convergence flag
-    if error_2[niter] <= tol_2 and error_1[niter] <= tol_1 and residual_norm < tol_res:
-        if nonlinear_method != "automatic":
-            set_net_option(net, "converged", True)
-        elif get_net_option(net, "alpha") == 1:
-            set_net_option(net, "converged", True)
-
-    if hyraulic_mode:
-        logger.debug("errorv: %s" % error_1[niter])
-        logger.debug("errorp: %s" % error_2[niter])
-        logger.debug("alpha: %s" % get_net_option(net, "alpha"))
-    else:
-        logger.debug("errorT: %s" % error_1[niter])
-        logger.debug("alpha: %s" % get_net_option(net, "alpha"))
+    for error, var, tol in zip(errors.values(), vars, tols):
+        converged = error[niter] <= tol
+        if not converged: break
+        logger.debug("error_%s: %s" % var, error[niter])
+    converged = converged and residual_norm <= tol_res
+    set_net_option(net, "converged", converged)
+    return converged
 
 
-def log_final_results(net, converged, niter, residual_norm, hyraulic_mode=True):
-    if hyraulic_mode:
-        solver = "hydraulics"
-        outputs = ["tol_p", "tol_v"]
-    else:
-        solver = "heat transfer"
-        outputs = ["tol_T"]
+def log_final_results(net, converged, niter, residual_norm, solver, tol_names):
     logger.debug("--------------------------------------------------------------------------------")
     if not converged:
         logger.debug("Maximum number of iterations reached but %s solver did not converge."
@@ -360,8 +335,8 @@ def log_final_results(net, converged, niter, residual_norm, hyraulic_mode=True):
         logger.debug("Calculation completed. Preparing results...")
         logger.debug("Converged after %d iterations." % niter)
         logger.debug("Norm of residual: %s" % residual_norm)
-        for out in outputs:
-            logger.debug("%s: %s" % (out, get_net_option(net, out)))
+        for tol in tol_names:
+            logger.debug("%s: %s" % (tol, get_net_option(net, tol)))
 
 
 class PipeflowNotConverged(ppException):

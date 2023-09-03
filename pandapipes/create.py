@@ -10,7 +10,7 @@ from pandapower.create import _get_multiple_index_with_check, _get_index_with_ch
 
 from pandapipes.component_models import Junction, Sink, Source, Pump, Pipe, ExtGrid, \
     HeatExchanger, Valve, CirculationPumpPressure, CirculationPumpMass, PressureControlComponent, \
-    Compressor, MassStorage
+    Compressor, MassStorage, HeatSink
 from pandapipes.component_models.component_toolbox import add_new_component
 from pandapipes.component_models.flow_control_component import FlowControlComponent
 from pandapipes.pandapipes_net import pandapipesNet, get_basic_net_entries, add_default_components
@@ -372,6 +372,63 @@ def create_heat_exchanger(net, from_junction, to_junction, diameter_m, qext_w, l
          "diameter_m": diameter_m, "qext_w": qext_w, "loss_coefficient": loss_coefficient,
          "in_service": bool(in_service), "type": type}
     _set_entries(net, "heat_exchanger", index, **v, **kwargs)
+
+    return index
+
+
+def create_heat_sink(net, from_junction, to_junction, diameter_m,
+                     controlled_mdot_kg_per_s=None, qext_w=None, deltat_k=None, t_return_k=None,
+                     loss_coefficient=0, name=None, index=None, in_service=True, type="heat_sink", **kwargs):
+    """
+    Creates a heat exchanger element in net["heat_exchanger"] from heat exchanger parameters.
+
+    :param net: The net for which this heat exchanger should be created
+    :type net: pandapipesNet
+    :param from_junction: ID of the junction on one side which the heat exchanger will be\
+            connected with
+    :type from_junction: int
+    :param to_junction: ID of the junction on the other side which the heat exchanger will be\
+            connected with
+    :type to_junction: int
+    :param diameter_m: The heat exchanger inner diameter in [m]
+    :type diameter_m: float
+    :param qext_w: External heat flux in [W]. If positive, heat is derived from the network. If
+            negative, heat is being fed into the network from a heat source.
+    :type qext_w: float
+    :param loss_coefficient: An additional pressure loss coefficient, introduced by e.g. bends
+    :type loss_coefficient: float
+    :param name: The name of the heat exchanger
+    :type name: str, default None
+    :param index: Force a specified ID if it is available. If None, the index one higher than the\
+            highest already existing index is selected.
+    :type index: int, default None
+    :param in_service: True if the heat exchanger is in service or False if it is out of service
+    :type in_service: bool, default True
+    :param type: Not used yet
+    :type type: str
+    :param kwargs: Additional keyword arguments will be added as further columns to the\
+                    net["heat_exchanger"] table
+    :return: index - The unique ID of the created heat exchanger
+    :rtype: int
+
+    :Example:
+        >>> create_heat_sink(net, from_junction=0, to_junction=1,
+        >>>                       diameter_m=40e-3, qext_w=2000)
+    """
+    if (controlled_mdot_kg_per_s is None) + (qext_w is None) + (deltat_k is None) + (t_return_k is None) !=2:
+        raise AttributeError(r"Define exact two varibales from 'controlled_mdot_kg_per_s', 'qext_w' ,"
+                             r"'deltat_k' and 't_return_k' different from None")
+
+    add_new_component(net, HeatSink)
+
+    index = _get_index_with_check(net, "heat_sink", index, "heat sink")
+    _check_branch(net, "Heat sink", index, from_junction, to_junction)
+
+    v = {"name": name, "from_junction": from_junction, "to_junction": to_junction,
+         "diameter_m": diameter_m, "controlled_mdot_kg_per_s": controlled_mdot_kg_per_s,
+         "qext_w": qext_w, "deltat_k": deltat_k, "t_return_k": t_return_k,
+         "loss_coefficient": loss_coefficient, "in_service": bool(in_service), "type": type}
+    _set_entries(net, "heat_sink", index, **v, **kwargs)
 
     return index
 

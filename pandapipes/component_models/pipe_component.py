@@ -5,13 +5,14 @@
 import matplotlib.pyplot as plt
 import numpy as np
 from numpy import dtype
+
 from pandapipes.component_models.abstract_models import BranchWInternalsComponent
 from pandapipes.component_models.component_toolbox import p_correction_height_air, \
     vinterp, set_entry_check_repeat
 from pandapipes.component_models.junction_component import Junction
 from pandapipes.constants import NORMAL_TEMPERATURE, NORMAL_PRESSURE
 from pandapipes.idx_branch import FROM_NODE, TO_NODE, LENGTH, D, AREA, K, \
-    VINIT, ALPHA, QEXT, TEXT, LOSS_COEFFICIENT as LC, T_OUT, TL
+    VINIT, ALPHA, QEXT, TEXT, LOSS_COEFFICIENT as LC, TINIT_OUT
 from pandapipes.idx_node import PINIT, HEIGHT, TINIT as TINIT_NODE, \
     RHO as RHO_NODES, PAMB, ACTIVE as ACTIVE_ND
 from pandapipes.pf.pipeflow_setup import get_fluid, get_lookup
@@ -153,23 +154,8 @@ class Pipe(BranchWInternalsComponent):
 
         node_pit = net["_pit"]["node"]
         to_nodes = pipe_pit[:, TO_NODE].astype(np.int32)
-        pipe_pit[:, T_OUT] = node_pit[to_nodes, TINIT_NODE]
+        pipe_pit[:, TINIT_OUT] = node_pit[to_nodes, TINIT_NODE]
         pipe_pit[:, AREA] = pipe_pit[:, D] ** 2 * np.pi / 4
-
-    @classmethod
-    def calculate_temperature_lift(cls, net, branch_component_pit, node_pit):
-        """
-
-        :param net:
-        :type net:
-        :param branch_component_pit:
-        :type branch_component_pit:
-        :param node_pit:
-        :type node_pit:
-        :return:
-        :rtype:
-        """
-        branch_component_pit[:, TL] = 0
 
     @classmethod
     def extract_results(cls, net, options, branch_results, nodes_connected, branches_connected):
@@ -214,7 +200,7 @@ class Pipe(BranchWInternalsComponent):
         v_pipe_idx = np.repeat(pipe, internal_sections[pipe])
         pipe_results = dict()
         pipe_results["PINIT"] = np.zeros((len(p_node_idx), 2), dtype=np.float64)
-        pipe_results["TINIT"] = np.zeros((len(p_node_idx), 2), dtype=np.float64)
+        pipe_results["TINIT_IN"] = np.zeros((len(p_node_idx), 2), dtype=np.float64)
         pipe_results["VINIT_FROM"] = np.zeros((len(v_pipe_idx), 2), dtype=np.float64)
         pipe_results["VINIT_TO"] = np.zeros((len(v_pipe_idx), 2), dtype=np.float64)
         pipe_results["VINIT_MEAN"] = np.zeros((len(v_pipe_idx), 2), dtype=np.float64)
@@ -254,11 +240,11 @@ class Pipe(BranchWInternalsComponent):
                                   2 / 3 * (p_from ** 3 - p_to ** 3) / (p_from ** 2 - p_to ** 2))
                 numerator = NORMAL_PRESSURE * node_pit[v_nodes, TINIT_NODE]
                 normfactor_mean = numerator * fluid.get_property("compressibility", p_mean) \
-                    / (p_mean * NORMAL_TEMPERATURE)
+                                  / (p_mean * NORMAL_TEMPERATURE)
                 normfactor_from = numerator * fluid.get_property("compressibility", p_from) \
-                    / (p_from * NORMAL_TEMPERATURE)
+                                  / (p_from * NORMAL_TEMPERATURE)
                 normfactor_to = numerator * fluid.get_property("compressibility", p_to) \
-                    / (p_to * NORMAL_TEMPERATURE)
+                                / (p_to * NORMAL_TEMPERATURE)
 
                 v_pipe_data_mean = v_pipe_data * normfactor_mean
                 v_pipe_data_from = v_pipe_data * normfactor_from
@@ -280,8 +266,8 @@ class Pipe(BranchWInternalsComponent):
 
             pipe_results["PINIT"][:, 0] = p_node_idx
             pipe_results["PINIT"][:, 1] = p_node_data
-            pipe_results["TINIT"][:, 0] = p_node_idx
-            pipe_results["TINIT"][:, 1] = t_node_data
+            pipe_results["TINIT_IN"][:, 0] = p_node_idx
+            pipe_results["TINIT_IN"][:, 1] = t_node_data
 
         else:
             logger.warning("For at least one pipe no internal data is available.")
@@ -355,7 +341,7 @@ class Pipe(BranchWInternalsComponent):
         pipe_p_data_idx = np.where(pipe_results["PINIT"][:, 0] == pipe)
         pipe_v_data_idx = np.where(pipe_results["VINIT_MEAN"][:, 0] == pipe)
         pipe_p_data = pipe_results["PINIT"][pipe_p_data_idx, 1]
-        pipe_t_data = pipe_results["TINIT"][pipe_p_data_idx, 1]
+        pipe_t_data = pipe_results["TINIT_IN"][pipe_p_data_idx, 1]
         pipe_v_data = pipe_results["VINIT_MEAN"][pipe_v_data_idx, 1]
         node_pit = net["_pit"]["node"]
 
