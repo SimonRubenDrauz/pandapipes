@@ -92,5 +92,5 @@ class BranchComponent(Component):
         return branch_component_pit, node_pit, from_nodes, to_nodes
 
     @classmethod
-    def extract_results(cls, net, options, branch_results, nodes_connected, branches_connected):
+    def extract_results(cls, net, options, branch_results, mode):
         raise NotImplementedError

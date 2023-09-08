@@ -6,9 +6,10 @@ import numpy as np
 from numpy import dtype
 
 from pandapipes.component_models.abstract_models import BranchWZeroLengthComponent, get_fluid
+from pandapipes.component_models.component_toolbox import standard_branch_wo_internals_result_lookup
 from pandapipes.component_models.junction_component import Junction
-from pandapipes.idx_branch import D, AREA, JAC_DERIV_DP, JAC_DERIV_DP1, JAC_DERIV_DV, VINIT, \
-    RHO, LOAD_VEC_BRANCHES, ELEMENT_IDX, MASS
+from pandapipes.idx_branch import D, AREA, TL, JAC_DERIV_DP, JAC_DERIV_DP1, JAC_DERIV_DV, VINIT, \
+    RHO, LOAD_VEC_BRANCHES, ELEMENT_IDX
 from pandapipes.pf.result_extraction import extract_branch_results_without_internals
 
 
@@ -46,9 +47,8 @@ class FlowControlComponent(BranchWZeroLengthComponent):
         fc_pit = super().create_pit_branch_entries(net, branch_pit)
         fc_pit[:, D] = net[cls.table_name()].diameter_m.values
         fc_pit[:, AREA] = fc_pit[:, D] ** 2 * np.pi / 4
-        fc_pit[:, MASS] = net[cls.table_name()].controlled_mdot_kg_per_s.values
-        fc_pit[:, VINIT] = fc_pit[:, MASS] / fc_pit[:, AREA] * fc_pit[:, RHO]
-        return fc_pit
+        fc_pit[:, VINIT] = net[cls.table_name()].controlled_mdot_kg_per_s.values / \
+            (fc_pit[:, AREA] * fc_pit[:, RHO])
 
     @classmethod
     def adaption_after_derivatives_hydraulic(cls, net, branch_pit, node_pit, idx_lookups, options):
@@ -65,24 +65,11 @@ class FlowControlComponent(BranchWZeroLengthComponent):
         fc_pit[active, LOAD_VEC_BRANCHES] = 0
 
     @classmethod
-    def extract_results(cls, net, options, branch_results, nodes_connected, branches_connected):
-        required_results = [
-            ("p_from_bar", "p_from"), ("p_to_bar", "p_to"), ("t_from_k", "temp_from"),
-            ("t_to_k", "temp_to"), ("mdot_to_kg_per_s", "mf_to"), ("mdot_from_kg_per_s", "mf_from"),
-            ("vdot_norm_m3_per_s", "vf"), ("lambda", "lambda"), ("reynolds", "reynolds")
-        ]
+    def extract_results(cls, net, options, branch_results, mode):
+        required_results_hyd, required_results_ht = standard_branch_wo_internals_result_lookup(net)
 
-        if get_fluid(net).is_gas:
-            required_results.extend([
-                ("v_from_m_per_s", "v_gas_from"), ("v_to_m_per_s", "v_gas_to"),
-                ("v_mean_m_per_s", "v_gas_mean"), ("normfactor_from", "normfactor_from"),
-                ("normfactor_to", "normfactor_to")
-            ])
-        else:
-            required_results.extend([("v_mean_m_per_s", "v_mps")])
-
-        extract_branch_results_without_internals(net, branch_results, required_results,
-                                                 cls.table_name(), branches_connected)
+        extract_branch_results_without_internals(net, branch_results, required_results_hyd,
+                                                 required_results_ht, cls.table_name(), mode)
 
     @classmethod
     def get_component_input(cls):
