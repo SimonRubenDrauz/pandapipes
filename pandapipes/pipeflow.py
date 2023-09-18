@@ -7,7 +7,7 @@ from numpy import linalg
 from scipy.sparse.linalg import spsolve
 
 from pandapipes.idx_branch import FROM_NODE, TO_NODE, FROM_NODE_T, \
-    TO_NODE_T, VINIT, TINIT_OUT, VINIT_T
+    TO_NODE_T, VINIT, T_OUT, VINIT_T
 from pandapipes.idx_node import PINIT, TINIT
 from pandapipes.pf.build_system_matrix import build_system_matrix
 from pandapipes.pf.derivative_calculation import calculate_derivatives_hydraulic, calculate_derivatives_thermal
@@ -93,11 +93,15 @@ def pipeflow(net, sol_vec=None, **kwargs):
     if not (calculate_hydraulics | calculate_heat | calculate_bidrect):
         raise UserWarning("No proper calculation mode chosen.")
     elif calculate_bidrect:
-        pass
+        converged = bidirectional(net, node_pit, branch_pit)
+        if not converged:
+            raise PipeflowNotConverged("The hydraulic calculation did not converge to a solution.")
+        extract_results_active_pit(net, mode="hydraulics")
+        extract_results_active_pit(net, mode="heat_transfer")
     else:
         if calculate_hydraulics:
             reduce_pit(net, node_pit, branch_pit, mode="hydraulics")
-            converged, _ = hydraulics(net)
+            converged = hydraulics(net)
             if not converged:
                 raise PipeflowNotConverged("The hydraulic calculation did not converge to a solution.")
             extract_results_active_pit(net, mode="hydraulics")
@@ -105,7 +109,7 @@ def pipeflow(net, sol_vec=None, **kwargs):
             node_pit, branch_pit = net["_pit"]["node"], net["_pit"]["branch"]
             identify_active_nodes_branches(net, branch_pit, node_pit, False)
             reduce_pit(net, node_pit, branch_pit, mode="heat_transfer")
-            converged, _ = heat_transfer(net)
+            converged = heat_transfer(net)
             if not converged:
                 raise PipeflowNotConverged("The heat transfer calculation did not converge to a "
                                            "solution.")
@@ -114,23 +118,26 @@ def pipeflow(net, sol_vec=None, **kwargs):
     extract_all_results(net, calculation_mode)
 
 
-def bidirectional(net):
-    max_iter, nonlinear_method, tol_p, tol_v, tol_res = get_net_options(
-        net, "iter", "nonlinear_method", "tol_p", "tol_v", "tol_res")
-
+def bidirectional(net, node_pit, branch_pit):
+    max_iter = get_net_options(net, "iter_bidirect")
     niter = 0
-    create_internal_results(net)
-    if not get_net_option(net, "reuse_internal_data") or "_internal_data" not in net:
-        net["_internal_data"] = dict()
+    converged_hyd, converged_heat = False, False
 
-    if net.fluid.is_gas:
-        logger.info("Caution! Temperature calculation does currently not affect hydraulic "
-                    "properties!")
+    reduce_pit(net, node_pit, branch_pit, mode="hydraulics")
+    while not get_net_option(net, "converged_hyd") or not get_net_option(net, "converged_heat") and niter <= max_iter:
+        converged_hyd = hydraulics(net)
+        node_pit, branch_pit = net["_pit"]["node"], net["_pit"]["branch"]
+        identify_active_nodes_branches(net, branch_pit, node_pit, False)
+        reduce_pit(net, node_pit, branch_pit, mode="heat_transfer")
+        converged_heat = heat_transfer(net)
+        set_net_option(net, "converged_hyd", converged_hyd)
+        set_net_option(net, "converged_heat", converged_heat)
+    net["converged"] = converged_hyd and converged_heat
+    return net["converged"]
 
-    error_v, error_p, error_t, error_t_out, residual_norm = [], [], [], [], None
 
 
-def newton_raphson(net, funct, solver, vars, tols):
+def newton_raphson(net, funct, solver, vars, tols, pit_names):
     max_iter, nonlinear_method, tol_res = get_net_options(net, "iter", "nonlinear_method", "tol_res")
     niter = 0
     # This branch is used to stop the solver after a specified error tolerance is reached
@@ -153,13 +160,15 @@ def newton_raphson(net, funct, solver, vars, tols):
             errors[var].append(linalg.norm(dval) / len(dval) if len(dval) else 0)
         converged = finalize_iteration(net, niter, residual_norm, nonlinear_method,
                                        errors=errors, tols=tols,  tol_res=tol_res,
-                                       vals_old=vals_old, vars=vars)
+                                       vals_old=vals_old, vars=vars, pit_names=pit_names)
         niter += 1
     net['converged'] = converged
     write_internal_results(net, **errors)
-    write_internal_results(net, iterations=niter, residual_norm=residual_norm)
+    kwargs = dict()
+    kwargs['residual_norm_%s' %solver] = residual_norm
+    kwargs['iterations_%s' %solver] = niter
+    write_internal_results(net, **kwargs)
     log_final_results(net, net['converged'], solver, niter, residual_norm, vars, tols)
-    return niter
 
 
 def hydraulics(net):
@@ -168,16 +177,15 @@ def hydraulics(net):
     if not get_net_option(net, "reuse_internal_data") or "_internal_data" not in net:
         net["_internal_data"] = dict()
     vars = ['v', 'p']
-    tol_v, tol_p = get_net_options(net, 'tol_v', 'tol_p')
-    niter = newton_raphson(net, solve_hydraulics, 'hydraulics', vars, [tol_v, tol_p])
+    tol_p, tol_v = get_net_options(net, 'tol_v', 'tol_p')
+    newton_raphson(net, solve_hydraulics, 'hydraulics', vars, [tol_v, tol_p], ['branch', 'node'])
     if net['converged']:
         set_user_pf_options(net, hyd_flag=True)
 
     if not get_net_option(net, "reuse_internal_data"):
         net.pop("_internal_data", None)
 
-    return net['converged'], niter
-
+    return net['converged']
 
 def heat_transfer(net):
     # Start of nonlinear loop
@@ -188,9 +196,9 @@ def heat_transfer(net):
                     "properties!")
     vars = ['Tin', 'Tout']
     tol_T = next(get_net_options(net, 'tol_T'))
-    niter = newton_raphson(net, solve_temperature, 'heat', vars, [tol_T, tol_T])
+    newton_raphson(net, solve_temperature, 'heat', vars, [tol_T, tol_T], ['node', 'branch'])
 
-    return net['converged'], niter
+    return net['converged']
 
 
 def solve_hydraulics(net):
@@ -266,13 +274,13 @@ def solve_temperature(net):
     jacobian, epsilon = build_system_matrix(net, branch_pit, node_pit, True)
 
     t_init_old = node_pit[:, TINIT].copy()
-    t_out_old = branch_pit[:, TINIT_OUT].copy()
+    t_out_old = branch_pit[:, T_OUT].copy()
 
     x = spsolve(jacobian, epsilon)
     node_pit[:, TINIT] += x[:len(node_pit)] * options["alpha"]
-    branch_pit[:, TINIT_OUT] += x[len(node_pit):]
+    branch_pit[:, T_OUT] += x[len(node_pit):]
 
-    return branch_pit[:, TINIT_OUT], node_pit[:, TINIT], t_out_old, t_init_old, epsilon
+    return branch_pit[:, T_OUT], node_pit[:, TINIT], t_out_old, t_init_old, epsilon
 
 
 def set_damping_factor(net, niter, errors):
@@ -290,7 +298,7 @@ def set_damping_factor(net, niter, errors):
         set_damping_factor(net, niter, [error_p, error_v])
     """
     error_increased = []
-    for error in errors:
+    for error in errors.values():
         error_increased.append(error[niter] > error[niter - 1])
     current_alpha = get_net_option(net, "alpha")
     if np.all(error_increased):
@@ -301,14 +309,15 @@ def set_damping_factor(net, niter, errors):
 
 
 def finalize_iteration(net, niter, residual_norm, nonlinear_method,
-                       errors, tols, tol_res, vals_old, vars):
+                       errors, tols, tol_res, vals_old, vars, pit_names):
     converged = False
     # Control of damping factor
     if nonlinear_method == "automatic":
         errors_increased = set_damping_factor(net, niter, errors)
         logger.debug("alpha: %s" % get_net_option(net, "alpha"))
-        for error_increased, var, val in zip(errors_increased, vars, vals_old):
-            if error_increased: net["_active_pit"]["node"][:, globals()[var.capitalize() + 'INIT']] = val
+        for error_increased, var, val, pit in zip(errors_increased, vars, vals_old, pit_names):
+            if error_increased:
+                net["_active_pit"][pit][:, globals()[var.capitalize() + 'INIT']] = val
         if get_net_option(net, "alpha") != 1:
             set_net_option(net, "converged", False)
             return converged
