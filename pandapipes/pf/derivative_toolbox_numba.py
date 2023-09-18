@@ -65,7 +65,7 @@ def derivatives_hydraulic_comp_numba(node_pit, branch_pit, lambda_, der_lambda, 
         p_sum = p_init_i_abs[i] + p_init_i1_abs[i]
         p_sum_div = np.divide(1, p_sum)
         fn = from_nodes[i]
-        tm = (node_pit[fn, TINIT_NODE] + branch_pit[:, T_OUT]) / 2
+        tm = (node_pit[fn, TINIT_NODE] + branch_pit[i][T_OUT]) / 2
 
         const_lambda = np.divide(NORMAL_PRESSURE * branch_pit[i][RHO] * tm,
                                  NORMAL_TEMPERATURE * P_CONVERSION)
