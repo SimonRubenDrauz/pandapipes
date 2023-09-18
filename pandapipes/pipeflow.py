@@ -149,7 +149,7 @@ def newton_raphson(net, funct, solver, vars, tols, pit_names):
     while not get_net_option(net, "converged") and niter <= max_iter:
         logger.debug("niter %d" % niter)
         # solve_hydraulics is where the calculation takes place
-        results = np.array(funct(net))
+        results = np.array(funct(net), dtype=object)
         logger.debug("residual: %s" % results[-1].round(4))
         residual_norm = linalg.norm(results[-1] / len(results[-1]))
 
